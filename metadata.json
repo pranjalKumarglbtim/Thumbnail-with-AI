@@ -1,0 +1,8 @@
+
+{
+  "name": "ThumbnailAI",
+  "description": "Create high-impact, viral-ready YouTube thumbnails using your own photos and Gemini AI. Just upload a selfie, describe your style, and let the AI handle the design.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
