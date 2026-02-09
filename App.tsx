@@ -31,12 +31,14 @@ import {
   MessageSquare,
   Send,
   X,
-  Bot
+  Bot,
+  Eye
 } from 'lucide-react';
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { ThumbnailConfig, GeneratedThumbnail, PRESETS, TextStyle, SUGGESTED_BACKGROUNDS, SUGGESTED_ACTIONS, SUGGESTED_EXPRESSIONS, ImageSize, SelectionArea } from './types';
 import { generateThumbnail } from './services/geminiService';
-import { SignInButton, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react';
+import { saveThumbnail, getUserThumbnails, deleteThumbnail as deleteFromFirebase, Thumbnail as FirebaseThumbnail } from './services/firebase';
+import { SignInButton, SignedIn, SignedOut, UserButton, useUser } from '@clerk/clerk-react';
 
 const LOADING_MESSAGES = [
   "Analyzing facial expressions...",
@@ -92,6 +94,37 @@ export default function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Examples modal state
+  const [isExamplesOpen, setIsExamplesOpen] = useState(false);
+
+  // Firebase data state
+  const [firebaseThumbnails, setFirebaseThumbnails] = useState<FirebaseThumbnail[]>([]);
+  
+  // Get current user from Clerk
+  const { user, isLoaded: isUserLoaded } = useUser();
+
+  // Subscribe to Firebase thumbnails when user is loaded and signed in
+  useEffect(() => {
+    if (isUserLoaded && user) {
+      const unsubscribe = getUserThumbnails(user.id, (thumbnails) => {
+        setFirebaseThumbnails(thumbnails);
+      });
+      return () => unsubscribe();
+    } else {
+      setFirebaseThumbnails([]);
+    }
+  }, [isUserLoaded, user]);
+
+  // Example thumbnails data
+  const exampleThumbnails = [
+    { id: 1, title: "Gaming React", thumbnail: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=400&h=225&fit=crop", views: "2.4M" },
+    { id: 2, title: "Tech Review", thumbnail: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=400&h=225&fit=crop", views: "1.8M" },
+    { id: 3, title: "Viral Challenge", thumbnail: "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=400&h=225&fit=crop", views: "5.1M" },
+    { id: 4, title: "Coding Tutorial", thumbnail: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=400&h=225&fit=crop", views: "890K" },
+    { id: 5, title: "Life Hacks", thumbnail: "https://images.unsplash.com/photo-1486312338219-ce68d2c6f44d?w=400&h=225&fit=crop", views: "3.2M" },
+    { id: 6, title: "Food Review", thumbnail: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400&h=225&fit=crop", views: "1.2M" },
+  ];
 
   useEffect(() => {
     const checkKey = async () => {
@@ -282,6 +315,21 @@ export default function App() {
       setGeneratedThumbnails(prev => [newThumbnail, ...prev]);
       setEditingThumbnailId(newThumbnail.id);
       setConfig(prev => ({ ...prev, selectionArea: null, editInstruction: '' }));
+
+      // Save to Firebase if user is signed in
+      if (user) {
+        try {
+          await saveThumbnail({
+            userId: user.id,
+            url: resultUrl,
+            config: { ...config, selectionArea: null },
+            styleName: config.isEditMode ? 'Refined' : (currentPreset?.name || 'Custom'),
+            timestamp: Date.now()
+          });
+        } catch (fbError) {
+          console.error('Error saving to Firebase:', fbError);
+        }
+      }
     } catch (err: any) {
       console.error("Generation Error:", err);
       const msg = err.message || "";
@@ -307,6 +355,26 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleDelete = async (id: string) => {
+    // Remove from local state
+    setGeneratedThumbnails(prev => prev.filter(t => t.id !== id));
+    
+    // Also remove from Firebase if user is signed in
+    if (user) {
+      try {
+        await deleteFromFirebase(id);
+      } catch (fbError) {
+        console.error('Error deleting from Firebase:', fbError);
+      }
+    }
+  
+    // Clear edit mode if deleting the currently edited thumbnail
+    if (editingThumbnailId === id) {
+      setEditingThumbnailId(null);
+      setConfig(prev => ({ ...prev, isEditMode: false, editInstruction: '', selectionArea: null }));
+    }
   };
 
   const currentPreviewImage = editingThumbnailId 
@@ -374,68 +442,222 @@ export default function App() {
 
       <SignedOut>
         {/* Landing Page for Unsigned Users */}
-        <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center px-6 py-20">
+        <div className="min-h-[calc(100vh-80px)] flex flex-col items-center justify-center px-6 py-20 relative overflow-hidden">
+          {/* Animated Background */}
           <div className="fixed inset-0 overflow-hidden pointer-events-none">
-            <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-indigo-600/10 blur-[120px] rounded-full" />
-            <div className="absolute top-[20%] -right-[5%] w-[30%] h-[30%] bg-purple-600/10 blur-[120px] rounded-full" />
+            <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-indigo-600/20 blur-[120px] rounded-full animate-pulse" />
+            <div className="absolute top-[20%] -right-[5%] w-[30%] h-[30%] bg-violet-600/20 blur-[120px] rounded-full animate-pulse [animation-delay:1s]" />
+            <div className="absolute -bottom-[10%] left-[20%] w-[35%] h-[35%] bg-fuchsia-600/15 blur-[120px] rounded-full animate-pulse [animation-delay:2s]" />
+            <div className="absolute top-[40%] left-[10%] w-[20%] h-[20%] bg-cyan-500/10 blur-[100px] rounded-full animate-pulse [animation-delay:3s]" />
+            {/* Floating particles */}
+            <div className="absolute top-1/4 left-1/4 w-2 h-2 bg-indigo-400/30 rounded-full animate-ping" style={{ animationDuration: '3s' }} />
+            <div className="absolute top-1/3 right-1/4 w-3 h-3 bg-violet-400/30 rounded-full animate-ping" style={{ animationDuration: '4s' }} />
+            <div className="absolute bottom-1/4 left-1/3 w-2 h-2 bg-fuchsia-400/30 rounded-full animate-ping" style={{ animationDuration: '5s' }} />
           </div>
           
-          <div className="relative text-center max-w-3xl">
-            <div className="mb-8">
-              <div className="relative inline-block">
-                <div className="absolute inset-0 bg-indigo-500 blur-md opacity-40 animate-pulse" />
-                <div className="relative bg-gradient-to-br from-indigo-500 to-violet-600 p-6 rounded-2xl shadow-lg shadow-indigo-500/20">
-                  <Zap className="w-16 h-16 text-white fill-white" />
+          <div className="relative text-center max-w-4xl">
+            {/* Badge */}
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-indigo-500/10 to-violet-500/10 border border-indigo-500/20 mb-8 animate-fade-in-up">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+              </span>
+              <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">AI-Powered Creator Studio</span>
+            </div>
+            
+            {/* Main Icon with animation */}
+            <div className="mb-10 relative inline-block animate-fade-in">
+              <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 blur-2xl opacity-40 animate-pulse" />
+              <div className="relative bg-gradient-to-br from-[#1a1a2e] to-[#16213e] p-8 rounded-3xl shadow-2xl shadow-indigo-500/20 border border-white/10">
+                <div className="absolute -top-3 -right-3 px-3 py-1 bg-gradient-to-r from-amber-400 to-orange-500 rounded-full text-xs font-bold text-black uppercase tracking-wider shadow-lg">
+                  New
                 </div>
+                <Zap className="w-20 h-20 text-white fill-white animate-bounce" style={{ animationDuration: '2s' }} />
               </div>
             </div>
             
-            <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-white mb-6">
-              Create Viral <span className="text-indigo-400">Thumbnails</span> with AI
+            {/* Animated Headline */}
+            <h1 className="text-5xl md:text-7xl font-black tracking-tighter text-white mb-6 animate-fade-in-up [animation-delay:0.2s]">
+              <span className="bg-gradient-to-r from-white via-indigo-200 to-violet-200 bg-clip-text text-transparent">
+                Create Thumbnails
+              </span>
+              <br />
+              <span className="bg-gradient-to-r from-indigo-400 via-violet-400 to-fuchsia-400 bg-clip-text text-transparent">
+                That Go Viral
+              </span>
             </h1>
             
-            <p className="text-xl text-slate-400 mb-10 max-w-2xl mx-auto">
-              Transform your photos into click-worthy YouTube thumbnails with AI-powered editing, expressions, and viral text styles.
+            {/* Animated Subtitle */}
+            <p className="text-xl md:text-2xl text-slate-300 mb-12 max-w-2xl mx-auto leading-relaxed animate-fade-in-up [animation-delay:0.4s]">
+              Transform your photos into scroll-stopping YouTube thumbnails with 
+              <span className="text-indigo-400 font-semibold"> AI-powered editing</span>, 
+              <span className="text-violet-400 font-semibold"> viral expressions</span>, and 
+              <span className="text-fuchsia-400 font-semibold"> stunning effects</span>.
             </p>
             
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            {/* CTA Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-16 animate-fade-in-up [animation-delay:0.6s]">
               <SignInButton mode="modal">
-                <button className="flex items-center gap-3 px-8 py-4 rounded-full bg-indigo-500 text-white hover:bg-indigo-400 transition-all text-lg font-bold uppercase tracking-tight shadow-lg shadow-indigo-500/25">
-                  <Sparkles className="w-5 h-5" />
-                  Sign In to Start
+                <button className="group relative flex items-center gap-3 px-10 py-5 rounded-full bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 text-white font-bold uppercase tracking-wide text-lg shadow-2xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition-all duration-300 hover:scale-105 hover:-translate-y-1">
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-r from-indigo-400 via-violet-400 to-fuchsia-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-md" />
+                  <Sparkles className="w-5 h-5 relative z-10" />
+                  <span className="relative z-10">Start Creating Free</span>
+                  <ChevronRight className="w-5 h-5 relative z-10 group-hover:translate-x-1 transition-transform" />
                 </button>
               </SignInButton>
-              <p className="text-slate-500 text-sm font-medium">
-                Free to try • No credit card required
-              </p>
+              <button 
+                onClick={() => setIsExamplesOpen(true)}
+                className="flex items-center gap-2 px-6 py-4 rounded-full border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white hover:border-white/20 transition-all duration-300 font-medium"
+              >
+                <Download className="w-4 h-4" />
+                View Examples
+              </button>
             </div>
             
-            <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-slate-900/50 border border-white/5 rounded-3xl p-6">
-                <div className="bg-indigo-500/10 w-12 h-12 rounded-xl flex items-center justify-center mb-4">
-                  <Wand2 className="w-6 h-6 text-indigo-400" />
-                </div>
-                <h3 className="text-white font-bold mb-2">AI-Powered Editing</h3>
-                <p className="text-slate-500 text-sm">Automatic expression detection and enhancement for maximum impact.</p>
+            {/* Trust indicators */}
+            <div className="flex flex-wrap items-center justify-center gap-8 text-sm text-slate-500 animate-fade-in-up [animation-delay:0.8s]">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>No credit card required</span>
               </div>
-              <div className="bg-slate-900/50 border border-white/5 rounded-3xl p-6">
-                <div className="bg-emerald-500/10 w-12 h-12 rounded-xl flex items-center justify-center mb-4">
-                  <TypeIcon className="w-6 h-6 text-emerald-400" />
-                </div>
-                <h3 className="text-white font-bold mb-2">Viral Text Styles</h3>
-                <p className="text-slate-500 text-sm">Choose from 3D impact, neon glow, and more to grab attention.</p>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Free tier available</span>
               </div>
-              <div className="bg-slate-900/50 border border-white/5 rounded-3xl p-6">
-                <div className="bg-amber-500/10 w-12 h-12 rounded-xl flex items-center justify-center mb-4">
-                  <Download className="w-6 h-6 text-amber-400" />
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>Export in 4K</span>
+              </div>
+            </div>
+            
+            {/* Feature Cards */}
+            <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in-up [animation-delay:1s]">
+              <div className="group relative bg-gradient-to-br from-slate-900/80 to-[#0f0f1a]/80 border border-white/10 rounded-3xl p-8 hover:border-indigo-500/30 transition-all duration-300 hover:scale-105 hover:-translate-y-2">
+                <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative">
+                  <div className="bg-gradient-to-br from-indigo-500 to-violet-600 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-500/20 group-hover:scale-110 transition-transform">
+                    <Wand2 className="w-7 h-7 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3">AI Expression Editor</h3>
+                  <p className="text-slate-400 leading-relaxed">Automatically detect and enhance facial expressions for maximum emotional impact and click-through rates.</p>
                 </div>
-                <h3 className="text-white font-bold mb-2">Export in 4K</h3>
-                <p className="text-slate-500 text-sm">Download high-resolution thumbnails ready for upload.</p>
+              </div>
+              
+              <div className="group relative bg-gradient-to-br from-slate-900/80 to-[#0f0f1a]/80 border border-white/10 rounded-3xl p-8 hover:border-violet-500/30 transition-all duration-300 hover:scale-105 hover:-translate-y-2">
+                <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-violet-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative">
+                  <div className="bg-gradient-to-br from-violet-500 to-fuchsia-600 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-violet-500/20 group-hover:scale-110 transition-transform">
+                    <TypeIcon className="w-7 h-7 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3">Viral Typography</h3>
+                  <p className="text-slate-400 leading-relaxed">Choose from 3D impact, neon glow, glitch effects, and premium styles that grab attention instantly.</p>
+                </div>
+              </div>
+              
+              <div className="group relative bg-gradient-to-br from-slate-900/80 to-[#0f0f1a]/80 border border-white/10 rounded-3xl p-8 hover:border-fuchsia-500/30 transition-all duration-300 hover:scale-105 hover:-translate-y-2">
+                <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-fuchsia-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative">
+                  <div className="bg-gradient-to-br from-fuchsia-500 to-pink-600 w-14 h-14 rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-fuchsia-500/20 group-hover:scale-110 transition-transform">
+                    <Download className="w-7 h-7 text-white" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-3">4K Ultra Export</h3>
+                  <p className="text-slate-400 leading-relaxed">Download crystal-clear thumbnails optimized for YouTube's recommended resolutions and aspect ratios.</p>
+                </div>
+              </div>
+            </div>
+            
+            {/* Stats Section */}
+            <div className="mt-20 grid grid-cols-2 md:grid-cols-4 gap-8 py-10 border-t border-white/5 animate-fade-in-up [animation-delay:1.2s]">
+              <div className="text-center">
+                <div className="text-4xl font-black bg-gradient-to-r from-indigo-400 to-violet-400 bg-clip-text text-transparent">10K+</div>
+                <div className="text-sm text-slate-500 mt-1">Thumbnails Created</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-black bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">5M+</div>
+                <div className="text-sm text-slate-500 mt-1">Views Generated</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-black bg-gradient-to-r from-fuchsia-400 to-pink-400 bg-clip-text text-transparent">98%</div>
+                <div className="text-sm text-slate-500 mt-1">Satisfaction Rate</div>
+              </div>
+              <div className="text-center">
+                <div className="text-4xl font-black bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-transparent">24/7</div>
+                <div className="text-sm text-slate-500 mt-1">AI Assistant</div>
               </div>
             </div>
           </div>
         </div>
       </SignedOut>
+
+      {/* Examples Modal */}
+      {isExamplesOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            onClick={() => setIsExamplesOpen(false)}
+          />
+          <div className="relative bg-[#0f172a] rounded-3xl max-w-5xl w-full max-h-[90vh] overflow-y-auto border border-white/10 shadow-2xl">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-[#0f172a]/95 backdrop-blur-lg border-b border-white/5 p-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Thumbnail Examples</h2>
+                <p className="text-slate-400 mt-1">See what you can create with ThumbnailAI</p>
+              </div>
+              <button 
+                onClick={() => setIsExamplesOpen(false)}
+                className="p-3 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Examples Grid */}
+            <div className="p-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {exampleThumbnails.map((item) => (
+                  <div 
+                    key={item.id}
+                    className="group relative bg-[#1e293b] rounded-2xl overflow-hidden border border-white/5 hover:border-indigo-500/30 transition-all duration-300 hover:scale-105 cursor-pointer"
+                  >
+                    <div className="aspect-video relative overflow-hidden">
+                      <img 
+                        src={item.thumbnail} 
+                        alt={item.title}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="absolute bottom-3 left-3 right-3 transform translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500 text-white text-xs font-bold">
+                          <Eye className="w-3.5 h-3.5" />
+                          {item.views}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      <h3 className="font-semibold text-white group-hover:text-indigo-400 transition-colors">{item.title}</h3>
+                      <p className="text-sm text-slate-500 mt-1">AI-Enhanced Thumbnail</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Call to Action */}
+              <div className="mt-12 text-center p-8 rounded-3xl bg-gradient-to-br from-indigo-500/10 via-violet-500/10 to-fuchsia-500/10 border border-white/10">
+                <h3 className="text-2xl font-bold text-white mb-3">Ready to Create Your Own?</h3>
+                <p className="text-slate-400 mb-6 max-w-md mx-auto">
+                  Join thousands of creators who are already using ThumbnailAI to boost their views.
+                </p>
+                <SignInButton mode="modal">
+                  <button className="inline-flex items-center gap-2 px-8 py-4 rounded-full bg-gradient-to-r from-indigo-500 via-violet-500 to-fuchsia-500 text-white font-bold uppercase tracking-wide hover:scale-105 transition-transform shadow-lg">
+                    <Sparkles className="w-5 h-5" />
+                    Get Started Free
+                  </button>
+                </SignInButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SignedIn>
         {/* Floating Chat Panel */}
@@ -884,6 +1106,12 @@ export default function App() {
                           className="bg-amber-500 text-black p-4 rounded-2xl shadow-2xl hover:bg-amber-400 flex items-center gap-2 font-black text-xs uppercase tracking-widest transition-transform hover:-translate-y-1"
                         >
                           <Square className="w-4 h-4" /> Select Area
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(thumb.id)}
+                          className="bg-red-500 text-white p-4 rounded-2xl shadow-2xl hover:bg-red-400 flex items-center gap-2 font-black text-xs uppercase tracking-widest transition-transform hover:-translate-y-1"
+                        >
+                          <Trash2 className="w-4 h-4" /> Delete
                         </button>
                       </div>
                     </div>

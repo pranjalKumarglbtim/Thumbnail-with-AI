@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { ThumbnailConfig, TextStyle } from "../types";
 
@@ -25,7 +24,13 @@ export const generateThumbnail = async (
   base64Image: string,
   config: ThumbnailConfig
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error("Google API key is not set. Please add VITE_GOOGLE_API_KEY to your .env file.");
+  }
+  
+  const ai = new GoogleGenAI({ apiKey });
   
   const isPro = config.quality === 'pro';
   const modelName = isPro ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
